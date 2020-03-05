@@ -1,0 +1,69 @@
+#!/bin/bash
+
+SERVERS_DIR=$(cd $(dirname $0) && pwd)/servers
+
+if [ $# != 1 ]; then
+    echo "./get-minecraft-server [release|snapshot|version name]"
+    exit 1
+fi
+
+echo Get version_manifest.json ...
+VERSION_MANIFEST=`curl \
+    https://launchermeta.mojang.com/mc/game/version_manifest.json \
+    2>/dev/null`
+
+if [ $1 == "ls" ]; then
+    echo $VERSION_MANIFEST \
+        | jq -r '.versions[] | [.releaseTime, .id, .type] | @csv' \
+        | sed 's/"//g' \
+        | sed 's/,/ /g' \
+        | awk '{printf "%s %-11s %s\n",$1,$3,$2}' \
+        | tac
+
+    exit 0
+fi
+
+if [ $1 == "snapshot" ] || [ $1 == "release" ]; then
+    VERSION=`echo $VERSION_MANIFEST \
+        | jq -r .latest.$1`
+else
+    VERSION=$1
+fi
+
+
+VERSION_JSON_URL=`echo $VERSION_MANIFEST \
+    | jq -r '.versions[] | select (.id == "'$VERSION'") | .url'`
+
+if [ "$VERSION_JSON_URL" == "" ]; then
+    echo "Selected version $VERSION is not found"
+    exit 1
+fi
+
+echo Get $VERSION.json ...
+VERSION_JSON=`curl $VERSION_JSON_URL 2>/dev/null`
+
+JAR_FILENAME=$SERVERS_DIR/$VERSION.jar
+
+JAR_DEFINED_SHA1=`echo $VERSION_JSON | jq -r '.downloads.server.sha1'`
+JAR_DEFINED_SIZE=`echo $VERSION_JSON | jq -r '.downloads.server.size'`
+JAR_DEFINED_URL=`echo $VERSION_JSON | jq -r '.downloads.server.url'`
+
+echo Get $VERSION.jar...
+
+curl $JAR_DEFINED_URL -o $JAR_FILENAME 2>/dev/null
+
+echo Get $VERSION.jar...
+
+JAR_SIZE=`ls -l $JAR_FILENAME | awk '{ print $5; }'`
+
+if [ "$JAR_SIZE" != "$JAR_DEFINED_SIZE" ]; then
+    echo WARNING: invalid file size
+fi
+
+JAR_SHA1=`sha1sum $JAR_FILENAME | awk '{ print $1; }'`
+
+if [ "$JAR_SHA1" != "$JAR_DEFINED_SHA1" ]; then
+    echo WARNING: invalid sha1
+fi
+
+echo Saved to $JAR_FILENAME
